@@ -1,4 +1,7 @@
 import { createSchema } from 'graphql-yoga'
+import { Link } from '@prisma/client'
+import { GraphQLContext } from './context'
+
 const typeDefinitions = `
     type Query {
         info: String!
@@ -16,45 +19,34 @@ const typeDefinitions = `
     }
 `
 
-type Link = {
-    id: string
-    url: string
-    description: string
-}
-
-const links: Link[] = [
-    {
-        id: 'link-0',
-        url: 'https://graphql-yoga.com',
-        description: 'The easiest way of setting up a GraphQL server'
-    }
-]
-
 const resolvers = {
     Query: {
         info: () => `This is the API of a Hackernews Clone`,
-        feed: () => links
-    },
-    Mutation: {
-        postLink: (parent: unknown, args: { description: string, url: string }) => {
-            let idCount = links.length
-
-            const link: Link = {
-                id: `link-${idCount}`,
-                description: args.description,
-                url: args.url
-            }
-
-            links.push(link)
-
-            return link
+        feed: async (parent: unknown, args: {}, context: GraphQLContext) => {
+            return context.prisma.link.findMany()
         }
     },
-    // Link: {
-    //     id: (parent: Link) => parent.id,
-    //     description: (parent: Link) => parent.description,
-    //     url: (parent: Link) => parent.url
-    // }
+    Link: {
+        id: (parent: Link) => parent.id,
+        description: (parent: Link) => parent.description,
+        url: (parent: Link) => parent.url
+    },
+    Mutation: {
+        async postLink(
+            parent: unknown, 
+            args: { description: string, url: string },
+            context: GraphQLContext
+        ) {
+            const newLink = await context.prisma.link.create({
+                data: {
+                    url: args.url,
+                    description: args.description
+                }
+            })
+
+            return newLink
+        }
+    }
 }
 
 export const schema = createSchema({
