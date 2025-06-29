@@ -153,3 +153,7 @@ typings/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
