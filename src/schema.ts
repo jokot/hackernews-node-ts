@@ -1,6 +1,36 @@
 import { createSchema } from 'graphql-yoga'
 import { Link, Comment} from '@prisma/client'
 import { GraphQLContext } from './context'
+import { GraphQLError } from 'graphql'
+import { Prisma } from '@prisma/client'
+
+const parseIntSafe = (value: string): number | null => {
+    if (/^(\d+)$/.test(value)) {
+        return parseInt(value, 10)
+    }
+    return null
+}
+
+// URL validation function that accepts both full URLs and domain-only URLs
+const validateAndNormalizeUrl = (url: string): string => {
+    // Remove leading/trailing whitespace
+    const trimmedUrl = url.trim()
+    
+    // Check if URL already has a protocol
+    if (trimmedUrl.match(/^https?:\/\//)) {
+        // Full URL with protocol - validate the format
+        if (!trimmedUrl.match(/^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$/)) {
+            throw new GraphQLError('Invalid URL format.')
+        }
+        return trimmedUrl
+    } else {
+        // Domain-only URL - validate domain format and add https://
+        if (!trimmedUrl.match(/^(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$/)) {
+            throw new GraphQLError('Invalid domain format.')
+        }
+        return `https://${trimmedUrl}`
+    }
+}
 
 const typeDefinitions = `
     type Query {
@@ -90,9 +120,15 @@ const resolvers = {
             args: { description: string, url: string },
             context: GraphQLContext
         ) {
+            const normalizedUrl = validateAndNormalizeUrl(args.url)
+            if (args.description.length === 0) {
+                return Promise.reject(
+                    new GraphQLError('Cannot post link with empty description.')
+                )
+            }
             const newLink = await context.prisma.link.create({
                 data: {
-                    url: args.url,
+                    url: normalizedUrl,
                     description: args.description
                 }
             })
@@ -104,11 +140,31 @@ const resolvers = {
             args: { linkId: string, body: string },
             context: GraphQLContext
         ) {
-            const newComment = await context.prisma.comment.create({
+            const linkId = parseIntSafe(args.linkId)
+            if (linkId === null) {
+                return Promise.reject(
+                    new GraphQLError(`Cannot post comment on non-existing link with id '${args.linkId}'`)
+                )
+            }
+            if (args.body.length === 0) {
+                return Promise.reject(
+                    new GraphQLError('Cannot post empty comment.')
+                )
+            }
+            const newComment = await context.prisma.comment
+            .create({
                 data: {
                     body: args.body,
                     linkId: parseInt(args.linkId)
                 }
+            })
+            .catch((err: unknown) => {
+                if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+                    return Promise.reject(
+                        new GraphQLError(`Cannot post comment on non-existing link with id '${args.linkId}'.`)
+                    )
+                }
+                return Promise.reject(err)
             })
 
             return newComment
